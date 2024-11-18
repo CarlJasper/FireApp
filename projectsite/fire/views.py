@@ -4,9 +4,9 @@ from fire.models import Locations, Incident
 from django.db import connection
 from django.http import JsonResponse
 from django.db.models.functions import ExtractMonth
-
 from django.db.models import Count
 from datetime import datetime
+
 
 class HomePageView(ListView):
     model = Locations
@@ -15,7 +15,7 @@ class HomePageView(ListView):
 
 class ChartView(ListView):
     template_name = 'chart.html'
-
+    
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         return context
@@ -23,11 +23,12 @@ class ChartView(ListView):
     def get_queryset(self, *args, **kwargs):
         pass
 
+
 def PieCountbySeverity(request):
     query = '''
     SELECT severity_level, COUNT(*) as count
     FROM fire_incident
-    GROUP BY severity_level
+    GROUP BY severity_level 
     '''
     data = {}
     with connection.cursor() as cursor:
@@ -35,42 +36,44 @@ def PieCountbySeverity(request):
         rows = cursor.fetchall()
 
     if rows:
-        # Construct the dictionary with severity level as keys and count as values
+        # Construct the directory with severity level as keys and count as values
         data = {severity: count for severity, count in rows}
     else:
         data = {}
-    
+
     return JsonResponse(data)
 
-def LineCountbyMonth(request):
-
+def LineCountByMonth(request):
     current_year = datetime.now().year
+
+    incidents_per_month = (
+        Incident.objects.filter(date_time__year=current_year)
+        .annotate(month=ExtractMonth('date_time'))
+        .values('month')
+        .annotate(count=Count('id'))
+        .order_by('month')
+    )
 
     result = {month: 0 for month in range(1, 13)}
 
-    incidents_per_month = Incident.objects.filter(date_time__year=current_year) \
-        .values_list('date_time', flat=True)
+    for item in incidents_per_month:
+        result[item['month']] = item['count']
 
-    # Counting the number of incidents per month
-    for date_time in incidents_per_month:
-        month = date_time.month
-        result[month] += 1
-
-    # If you want to convert month numbers to month names, you can use a dictionary mapping
     month_names = {
         1: 'Jan', 2: 'Feb', 3: 'Mar', 4: 'Apr', 5: 'May', 6: 'Jun',
         7: 'Jul', 8: 'Aug', 9: 'Sep', 10: 'Oct', 11: 'Nov', 12: 'Dec'
     }
 
     result_with_month_names = {
-        month_names[int(month)]: count for month, count in result.items()}
+        month_names[month]: count for month, count in result.items()
+    }
 
     return JsonResponse(result_with_month_names)
 
 def MultilineIncidentTop3Country(request):
-    
+
     query = '''
-        SELECT
+    SELECT
         fl.country,
         strftime('%m', fi.date_time) AS month,
         COUNT(fi.id) AS incident_count
@@ -89,9 +92,11 @@ def MultilineIncidentTop3Country(request):
             WHERE
                 strftime('%Y', fi_top.date_time) = strftime('%Y', 'now')
             GROUP BY
+                fl_top.country
+            ORDER BY
                 COUNT(fi_top.id) DESC
             LIMIT 3
-        )
+        )   
         AND strftime('%Y', fi.date_time) = strftime('%Y', 'now')
     GROUP BY
         fl.country, month
@@ -102,13 +107,13 @@ def MultilineIncidentTop3Country(request):
     with connection.cursor() as cursor:
         cursor.execute(query)
         rows = cursor.fetchall()
-    
+
     # Initialize a dictionary to store the result
     result = {}
-    
+
     # Initialize a set of months from January to December
     months = set(str(i).zfill(2) for i in range(1, 13))
-    
+
     # Loop through the query results
     for row in rows:
         country = row[0]
@@ -119,21 +124,21 @@ def MultilineIncidentTop3Country(request):
         if country not in result:
             result[country] = {month: 0 for month in months}
 
-        # Update the incident count for the corresponding month
+        # Update the incidents count for the corresponding month
         result[country][month] = total_incidents
-    
+
     # Ensure there are always 3 countries in the result
     while len(result) < 3:
         # Placeholder name for missing countries
         missing_country = f"Country {len(result) + 1}"
         result[missing_country] = {month: 0 for month in months}
-    
+
     for country in result:
         result[country] = dict(sorted(result[country].items()))
 
     return JsonResponse(result)
 
-def multipleBarbySeverity(request): 
+def multipleBarbySeverity(request):
     query = '''
     SELECT
         fi.severity_level,
@@ -149,26 +154,22 @@ def multipleBarbySeverity(request):
         rows = cursor.fetchall()
 
     result = {}
-    months = set(str(i).zfill(2) for i in range(1, 13))
+    months = {str(i).zfill(2) for i in range(1, 13)}  # Ensure all months are included
 
-    for row  in rows:
-        level = str(row[0]) #Ensure the severity is a string
+    for row in rows:
+        severity_level = row[0]
         month = row[1]
-        total_incidents = row[2] 
+        count = row[2]
 
-        if level not in result:
-            result[level] = {month: 0 for  month in months}
+        if severity_level not in result:
+            result[severity_level] = {month: 0 for month in months}
 
-        result[level] [month] = total_incidents
+        result[severity_level][month] = count
 
-    #Sort months within each severity level
-    for level in result:
-        result[level] = dict(sorted(result[level].items()))
+    # Sort months within each severity level
+    for severity_level in result:
+        result[severity_level] = dict(sorted(result[severity_level].items()))
 
     return JsonResponse(result)
-
-    
-
-
 
 
